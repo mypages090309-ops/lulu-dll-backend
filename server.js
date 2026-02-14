@@ -10,11 +10,17 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-/* ================= HELPER ================= */
-function write(sheet, cell, value) {
-  const c = sheet.getCell(cell);
-  c.value = value || "";
-  c.alignment = { wrapText: true, vertical: "top" };
+/* ================= MERGED CELL SAFE WRITE ================= */
+function writeMerged(sheet, row, startCol, endCol, value) {
+  // write to the top-left cell of merged range
+  const cell = sheet.getCell(row, startCol);
+  cell.value = value || "";
+  cell.alignment = { wrapText: true, vertical: "top" };
+
+  // ensure merged (safe even if already merged)
+  try {
+    sheet.mergeCells(row, startCol, row, endCol);
+  } catch {}
 }
 
 /* ================= HEALTH ================= */
@@ -38,7 +44,6 @@ app.post("/fill-dll", async (req, res) => {
       return res.status(400).json({ error: "Missing generatedLesson" });
     }
 
-    /* ===== LOAD TEMPLATE ===== */
     const templatePath = path.join(process.cwd(), "DLL_FORMAT.xlsx");
     if (!fs.existsSync(templatePath)) {
       return res.status(500).json({ error: "DLL_FORMAT.xlsx not found" });
@@ -46,40 +51,37 @@ app.post("/fill-dll", async (req, res) => {
 
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(templatePath);
-
-    // Single sheet (as per your template)
     const sheet = wb.getWorksheet(1);
 
-    /* ================= HEADER (C–G MERGED) ================= */
-    write(sheet, "C5", teacherName);
-    write(sheet, "C6", gradeLevel);
-    write(sheet, "C7", subject);
-    write(sheet, "C8", quarter);
-    write(sheet, "C9", weekDate);
+    /* ===== HEADER (ACTUAL INPUT AREA: D–H) ===== */
+    writeMerged(sheet, 5, 4, 8, teacherName);   // D5:H5
+    writeMerged(sheet, 6, 4, 8, gradeLevel);    // D6:H6
+    writeMerged(sheet, 7, 4, 8, subject);       // D7:H7
+    writeMerged(sheet, 8, 4, 8, quarter);       // D8:H8
+    writeMerged(sheet, 9, 4, 8, weekDate);      // D9:H9
 
-    /* ================= I. OBJECTIVES (C12:G14) ================= */
-    const objectivesText = Array.isArray(generatedLesson.I_Objectives)
+    /* ===== I. OBJECTIVES (D12:H14) ===== */
+    const objectives = Array.isArray(generatedLesson.I_Objectives)
       ? generatedLesson.I_Objectives.join("\n")
       : generatedLesson.I_Objectives || "";
 
-    write(sheet, "C12", objectivesText);
+    writeMerged(sheet, 12, 4, 8, objectives);
 
-    /* ================= II. CONTENT (C16:G16) ================= */
-    write(sheet, "C16", generatedLesson.II_Content || "");
+    /* ===== II. CONTENT (D16:H16) ===== */
+    writeMerged(sheet, 16, 4, 8, generatedLesson.II_Content || "");
 
-    /* ================= III. LEARNING RESOURCES (C18:G20) ================= */
-    const resourcesText = Array.isArray(generatedLesson.III_LearningResources)
+    /* ===== III. LEARNING RESOURCES (D18:H20) ===== */
+    const resources = Array.isArray(generatedLesson.III_LearningResources)
       ? generatedLesson.III_LearningResources.join("\n")
       : generatedLesson.III_LearningResources || "";
 
-    write(sheet, "C18", resourcesText);
+    writeMerged(sheet, 18, 4, 8, resources);
 
-    /* ================= IV. PROCEDURES (WEEKLY – FINAL FIX) ================= */
+    /* ===== IV. PROCEDURES – WEEKLY (D–H) ===== */
     const procedures = Array.isArray(generatedLesson.IV_Procedures)
       ? generatedLesson.IV_Procedures
       : [];
 
-    // EXACT row starts based on YOUR DLL_FORMAT.xlsx
     const dayRowMap = {
       Monday: 23,
       Tuesday: 31,
@@ -88,19 +90,14 @@ app.post("/fill-dll", async (req, res) => {
       Friday: 55
     };
 
-    Object.entries(dayRowMap).forEach(([day, startRow]) => {
-      // Day label (Column B)
-      write(sheet, `B${startRow - 1}`, day);
-
-      // A–G Procedures (C–G merged per row)
+    Object.values(dayRowMap).forEach(startRow => {
       for (let i = 0; i < 7; i++) {
-        write(sheet, `C${startRow + i}`, procedures[i] || "");
+        writeMerged(sheet, startRow + i, 4, 8, procedures[i] || "");
       }
     });
 
-    /* ================= EXPORT ================= */
+    /* ===== EXPORT ===== */
     const buffer = await wb.xlsx.writeBuffer();
-
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -109,7 +106,6 @@ app.post("/fill-dll", async (req, res) => {
       "Content-Disposition",
       'attachment; filename="DLL_FILLED.xlsx"'
     );
-
     res.send(buffer);
 
   } catch (err) {
@@ -118,7 +114,6 @@ app.post("/fill-dll", async (req, res) => {
   }
 });
 
-/* ================= START ================= */
 app.listen(PORT, () => {
   console.log(`✅ DLL Excel Fill Service running on port ${PORT}`);
 });
