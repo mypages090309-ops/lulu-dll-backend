@@ -2,7 +2,6 @@ const express = require("express");
 const cors = require("cors");
 const ExcelJS = require("exceljs");
 const path = require("path");
-const fs = require("fs");
 
 const app = express();
 app.use(cors());
@@ -10,99 +9,48 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-/* ================= HEALTH ================= */
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
-});
-
-/* ================= DLL MACHINE EXPORT ================= */
 app.post("/fill-dll", async (req, res) => {
   try {
-    const {
-      teacherName,
-      gradeLevel,
-      subject,
-      quarter,
-      weekDate,
-      generatedLesson
-    } = req.body;
-
-    if (!generatedLesson) {
-      return res.status(400).json({ error: "Missing generatedLesson" });
-    }
-
-    const templatePath = path.join(__dirname, "DLL_MACHINE.xlsx");
-    if (!fs.existsSync(templatePath)) {
-      return res.status(500).json({ error: "DLL_MACHINE.xlsx not found" });
-    }
+    const { teacherName, gradeLevel, subject, quarter, weekDate, generatedLesson } = req.body;
 
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(templatePath);
-    const sheet = wb.getWorksheet("DLL_DATA");
+    await wb.xlsx.readFile(path.join(__dirname, "DLL_FORMAT.xlsx"));
 
-    const write = (cell, value) => {
-      sheet.getCell(cell).value = value || "";
+    const sheet = wb.worksheets[0];
+
+    const writeByName = (name, value) => {
+      const ranges = wb.definedNames.getRanges(name);
+      if (!ranges) return;
+      ranges.forEach(r => {
+        sheet.getCell(r).value = value || "";
+      });
     };
 
     /* ===== HEADER ===== */
-    write("B1", teacherName);
-    write("B2", gradeLevel);
-    write("B3", subject);
-    write("B4", quarter);
-    write("B5", weekDate);
+    writeByName("teacher_name", teacherName);
+    writeByName("grade_level", gradeLevel);
+    writeByName("learning_area", subject);
+    writeByName("quarter", quarter);
+    writeByName("week_date", weekDate);
 
     /* ===== OBJECTIVES ===== */
-    const objectives = generatedLesson.I_Objectives || [];
-    write("B7", objectives[0] || "");
-    write("B8", objectives[1] || "");
-    write("B9", objectives[2] || "");
+    writeByName("obj_content", generatedLesson.I_Objectives?.[0]);
+    writeByName("obj_performance", generatedLesson.I_Objectives?.[1]);
+    writeByName("obj_learning_competencies", generatedLesson.I_Objectives?.[2]);
 
-    /* ===== CONTENT & RESOURCES ===== */
-    write("B11", generatedLesson.II_Content || "");
-    write(
-      "B12",
-      Array.isArray(generatedLesson.III_LearningResources)
-        ? generatedLesson.III_LearningResources.join("\n")
-        : generatedLesson.III_LearningResources || ""
-    );
+    /* ===== PROCEDURES (A–J COMPLETE) ===== */
+    const p = generatedLesson.IV_Procedures || [];
 
-    /* ===== PROCEDURES ===== */
-    const steps = Array.isArray(generatedLesson.IV_Procedures)
-      ? generatedLesson.IV_Procedures
-      : [];
-
-    const [
-      motivation,
-      presentation,
-      discussion,
-      practice,
-      generalization,
-      assessment,
-      assignment
-    ] = steps;
-
-    const dayPlan = {
-      Monday: [motivation, generalization],
-      Tuesday: [presentation, discussion],
-      Wednesday: [practice],
-      Thursday: [assignment],
-      Friday: [assessment, generalization]
-    };
-
-    const dayRowMap = {
-      Monday: 15,
-      Tuesday: 23,
-      Wednesday: 31,
-      Thursday: 39,
-      Friday: 47
-    };
-
-    Object.entries(dayRowMap).forEach(([day, startRow]) => {
-      const items = dayPlan[day] || [];
-      for (let i = 0; i < 7; i++) {
-        write(`B${startRow + i}`, items[i] || "");
-      }
-    });
+    writeByName("proc_A_review", p[0]);
+    writeByName("proc_B_motivation", p[1]);
+    writeByName("proc_C_presentation", p[2]);
+    writeByName("proc_D_discussion", p[3]);
+    writeByName("proc_E_practice", p[4]);
+    writeByName("proc_F_mastery", p[5]);
+    writeByName("proc_G_application", p[6]);
+    writeByName("proc_H_generalization", p[7]);
+    writeByName("proc_I_evaluation", p[8]);
+    writeByName("proc_J_remediation", p[9]);
 
     const buffer = await wb.xlsx.writeBuffer();
 
@@ -112,18 +60,17 @@ app.post("/fill-dll", async (req, res) => {
     );
     res.setHeader(
       "Content-Disposition",
-      'attachment; filename="DLL_MACHINE_FILLED.xlsx"'
+      'attachment; filename="DLL_FINAL.xlsx"'
     );
 
     res.send(buffer);
 
   } catch (err) {
-    console.error("DLL ERROR:", err);
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-/* ================= START ================= */
 app.listen(PORT, () => {
-  console.log(`✅ DLL Machine Service running on port ${PORT}`);
+  console.log("✅ DLL FINAL SERVICE RUNNING");
 });
