@@ -53,18 +53,44 @@ app.post("/fill-dll", async (req, res) => {
 
     /* ===== OBJECTIVES ===== */
     const objectives = generatedLesson.I_Objectives || [];
-    write("B7", objectives[0]);
-    write("B8", objectives[1]);
-    write("B9", objectives[2]);
+    write("B7", objectives[0] || "");
+    write("B8", objectives[1] || "");
+    write("B9", objectives[2] || "");
 
     /* ===== CONTENT & RESOURCES ===== */
-    write("B11", generatedLesson.II_Content);
-    write("B12", (generatedLesson.III_LearningResources || []).join("\n"));
+    write("B11", generatedLesson.II_Content || "");
+    write(
+      "B12",
+      Array.isArray(generatedLesson.III_LearningResources)
+        ? generatedLesson.III_LearningResources.join("\n")
+        : generatedLesson.III_LearningResources || ""
+    );
 
-    /* ===== PROCEDURES (PER DAY VARIATION) ===== */
-    const procedures = generatedLesson.IV_Procedures || [];
+    /* ===== BASE PROCEDURES (A–G) ===== */
+    const steps = Array.isArray(generatedLesson.IV_Procedures)
+      ? generatedLesson.IV_Procedures
+      : [];
 
-    const dayMap = {
+    const [
+      motivation,
+      presentation,
+      discussion,
+      practice,
+      generalization,
+      assessment,
+      assignment
+    ] = steps;
+
+    /* ===== PER-DAY VARIATION (SMART SPLIT) ===== */
+    const dayPlan = {
+      Monday: [motivation, generalization],
+      Tuesday: [presentation, discussion],
+      Wednesday: [practice],
+      Thursday: [assignment],
+      Friday: [assessment, generalization]
+    };
+
+    const dayRowMap = {
       Monday: 15,
       Tuesday: 23,
       Wednesday: 31,
@@ -72,9 +98,10 @@ app.post("/fill-dll", async (req, res) => {
       Friday: 47
     };
 
-    Object.values(dayMap).forEach(startRow => {
+    Object.entries(dayRowMap).forEach(([day, startRow]) => {
+      const items = dayPlan[day] || [];
       for (let i = 0; i < 7; i++) {
-        write(`B${startRow + i}`, procedures[i] || "");
+        write(`B${startRow + i}`, items[i] || "");
       }
     });
 
@@ -93,11 +120,12 @@ app.post("/fill-dll", async (req, res) => {
     res.send(buffer);
 
   } catch (err) {
-    console.error(err);
+    console.error("DLL ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
+/* ================= START ================= */
 app.listen(PORT, () => {
   console.log(`✅ DLL Machine Service running on port ${PORT}`);
 });
