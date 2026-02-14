@@ -1,89 +1,100 @@
-const express = require("express");
-const cors = require("cors");
-const ExcelJS = require("exceljs");
-const path = require("path");
+import express from "express";
+import cors from "cors";
+import ExcelJS from "exceljs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
+// ===============================
+// HELPER: safely set named range
+// ===============================
+function setNamedRange(workbook, rangeName, value) {
+  const definedName = workbook.definedNames.getName(rangeName);
+  if (!definedName) return;
+
+  const ranges = definedName.ranges;
+  ranges.forEach((r) => {
+    const ws = workbook.getWorksheet(r.split("!")[0].replace(/'/g, ""));
+    const cellRef = r.split("!")[1];
+    ws.getCell(cellRef).value = value ?? "";
+  });
+}
+
+// ===============================
+// MAIN ENDPOINT
+// ===============================
 app.post("/fill-dll", async (req, res) => {
   try {
-    const {
-      teacherName,
-      gradeLevel,
-      subject,
-      quarter,
-      weekDate,
-      generatedLesson
-    } = req.body;
+    const data = req.body;
 
     const workbook = new ExcelJS.Workbook();
-
-    // ✅ VERY IMPORTANT: DepEd DLL FORMAT
     await workbook.xlsx.readFile(
       path.join(__dirname, "DLL_FORMAT.xlsx")
     );
 
-    const sheet = workbook.worksheets[0];
+    // ===============================
+    // HEADER FIELDS
+    // ===============================
+    setNamedRange(workbook, "school_name", data.school);
+    setNamedRange(workbook, "teacher_name", data.teacherName);
+    setNamedRange(workbook, "grade_level", data.gradeLevel);
+    setNamedRange(workbook, "learning_area", data.subject);
+    setNamedRange(workbook, "quarter", data.quarter);
+    setNamedRange(workbook, "week_date", data.weekDate);
 
-    // ===== HELPER: WRITE BY NAME RANGE =====
-    const writeByName = (rangeName, value) => {
-      const ranges = workbook.definedNames.getRanges(rangeName);
-      if (!ranges) return;
-      ranges.forEach(r => {
-        sheet.getCell(r).value = value || "";
-      });
-    };
+    // ===============================
+    // DAYS (MONDAY – FRIDAY)
+    // ===============================
+    const days = ["monday", "tuesday", "wednesday", "thursday", "friday"];
 
-    // ================= HEADER =================
-    writeByName("teacher_name", teacherName);
-    writeByName("grade_level", gradeLevel);
-    writeByName("learning_area", subject);
-    writeByName("quarter", quarter);
-    writeByName("week_date", weekDate);
+    days.forEach((day) => {
+      const d = data.dll?.[day] || {};
 
-    // ================= OBJECTIVES =================
-    writeByName("obj_content", generatedLesson.I_Objectives?.[0]);
-    writeByName("obj_performance", generatedLesson.I_Objectives?.[1]);
-    writeByName("obj_learning_competencies", generatedLesson.I_Objectives?.[2]);
+      setNamedRange(workbook, `${day}_objectives`, d.objectives);
+      setNamedRange(workbook, `${day}_content`, d.content);
 
-    // ================= PROCEDURES (A–J) =================
-    const p = generatedLesson.IV_Procedures || [];
+      // PROCEDURES A–J (10 steps)
+      setNamedRange(workbook, `${day}_proc_a`, d.procedures?.A);
+      setNamedRange(workbook, `${day}_proc_b`, d.procedures?.B);
+      setNamedRange(workbook, `${day}_proc_c`, d.procedures?.C);
+      setNamedRange(workbook, `${day}_proc_d`, d.procedures?.D);
+      setNamedRange(workbook, `${day}_proc_e`, d.procedures?.E);
+      setNamedRange(workbook, `${day}_proc_f`, d.procedures?.F);
+      setNamedRange(workbook, `${day}_proc_g`, d.procedures?.G);
+      setNamedRange(workbook, `${day}_proc_h`, d.procedures?.H);
+      setNamedRange(workbook, `${day}_proc_i`, d.procedures?.I);
+      setNamedRange(workbook, `${day}_proc_j`, d.procedures?.J);
 
-    writeByName("proc_A_review", p[0]);
-    writeByName("proc_B_motivation", p[1]);
-    writeByName("proc_C_presentation", p[2]);
-    writeByName("proc_D_discussion", p[3]);
-    writeByName("proc_E_practice", p[4]);
-    writeByName("proc_F_mastery", p[5]);
-    writeByName("proc_G_application", p[6]);
-    writeByName("proc_H_generalization", p[7]);
-    writeByName("proc_I_evaluation", p[8]);
-    writeByName("proc_J_remediation", p[9]);
+      setNamedRange(workbook, `${day}_assessment`, d.assessment);
+      setNamedRange(workbook, `${day}_assignment`, d.assignment);
+      setNamedRange(workbook, `${day}_remarks`, d.remarks);
+    });
 
-    // ================= EXPORT =================
-    const buffer = await workbook.xlsx.writeBuffer();
-
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
+    // ===============================
+    // SEND FILE
+    // ===============================
     res.setHeader(
       "Content-Disposition",
-      'attachment; filename="DEPED_DLL_FINAL.xlsx"'
+      "attachment; filename=DLL_DEPED.xlsx"
     );
 
-    res.send(buffer);
+    await workbook.xlsx.write(res);
+    res.end();
 
-  } catch (error) {
-    console.error("DLL EXPORT ERROR:", error);
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error("DLL EXPORT ERROR:", err);
+    res.status(500).json({ error: "DLL export failed" });
   }
 });
 
+// ===============================
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("✅ DepEd DLL Service Running");
+  console.log(`DLL Excel Fill Service running on port ${PORT}`);
 });
