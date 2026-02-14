@@ -1,8 +1,8 @@
-import express from "express";
-import cors from "cors";
-import ExcelJS from "exceljs";
-import path from "path";
-import fs from "fs";
+const express = require("express");
+const cors = require("cors");
+const ExcelJS = require("exceljs");
+const path = require("path");
+const fs = require("fs");
 
 const app = express();
 app.use(cors());
@@ -31,7 +31,7 @@ app.post("/fill-dll", async (req, res) => {
       return res.status(400).json({ error: "Missing generatedLesson" });
     }
 
-    const templatePath = path.join(process.cwd(), "DLL_MACHINE.xlsx");
+    const templatePath = path.join(__dirname, "DLL_MACHINE.xlsx");
     if (!fs.existsSync(templatePath)) {
       return res.status(500).json({ error: "DLL_MACHINE.xlsx not found" });
     }
@@ -66,7 +66,7 @@ app.post("/fill-dll", async (req, res) => {
         : generatedLesson.III_LearningResources || ""
     );
 
-    /* ===== BASE PROCEDURES (A–G) ===== */
+    /* ===== PROCEDURES ===== */
     const steps = Array.isArray(generatedLesson.IV_Procedures)
       ? generatedLesson.IV_Procedures
       : [];
@@ -81,7 +81,6 @@ app.post("/fill-dll", async (req, res) => {
       assignment
     ] = steps;
 
-    /* ===== PER-DAY VARIATION (SMART SPLIT) ===== */
     const dayPlan = {
       Monday: [motivation, generalization],
       Tuesday: [presentation, discussion],
@@ -105,7 +104,6 @@ app.post("/fill-dll", async (req, res) => {
       }
     });
 
-    /* ===== EXPORT ===== */
     const buffer = await wb.xlsx.writeBuffer();
 
     res.setHeader(
