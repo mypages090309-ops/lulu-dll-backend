@@ -1,131 +1,116 @@
 import express from "express";
 import cors from "cors";
-import XLSX from "xlsx";
-import fs from "fs";
+import ExcelJS from "exceljs";
 import path from "path";
-import { fileURLToPath } from "url";
+import fs from "fs";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const PORT = process.env.PORT || 3000;
 
-// ===============================
-// POST /fill-dll
-// ===============================
-app.post("/fill-dll", (req, res) => {
+// helper: write to merged cell safely
+function writeCell(sheet, cell, value) {
+  const c = sheet.getCell(cell);
+  c.value = value || "";
+  c.alignment = { wrapText: true, vertical: "top" };
+}
+
+// =======================
+// FILL DLL ENDPOINT
+// =======================
+app.post("/fill-dll", async (req, res) => {
   try {
-    const data = req.body;
+    const lesson = req.body;
 
-    // -------------------------------
-    // Load template
-    // -------------------------------
-    const templatePath = path.join(__dirname, "DLL_FORMAT.xlsx");
+    const templatePath = path.join(process.cwd(), "DLL_FORMAT.xlsx");
     if (!fs.existsSync(templatePath)) {
-      throw new Error("DLL_FORMAT.xlsx not found");
+      return res.status(500).json({ error: "DLL template not found" });
     }
 
-    const workbook = XLSX.readFile(templatePath);
-    const sheetName = "DLL";
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(templatePath);
+    const sheet = workbook.worksheets[0];
 
-    if (!workbook.Sheets[sheetName]) {
-      throw new Error("Sheet 'DLL' not found in template");
-    }
+    // =======================
+    // HEADER (STATIC)
+    // =======================
+    writeCell(sheet, "C5", lesson.teacherName);
+    writeCell(sheet, "C6", lesson.gradeLevel);
+    writeCell(sheet, "C7", lesson.subject);
+    writeCell(sheet, "C8", lesson.quarter);
+    writeCell(sheet, "C9", lesson.weekDate);
 
-    const sheet = workbook.Sheets[sheetName];
-
-    // -------------------------------
-    // Helper function
-    // -------------------------------
-    const setCell = (cell, value) => {
-      sheet[cell] = { t: "s", v: value ?? "" };
-    };
-
-    // ===============================
-    // HEADER SECTION
-    // ===============================
-    setCell("C5", data.teacherName);
-    setCell("C6", data.gradeLevel);
-    setCell("C7", data.subject);
-    setCell("F5", data.quarter);
-    setCell("F6", data.weekDate);
-    setCell("C8", data.topic);
-
-    // ===============================
+    // =======================
     // I. OBJECTIVES
-    // ===============================
-    (data.objectives || []).forEach((text, i) => {
-      setCell(`C${11 + i}`, text);
-    });
+    // =======================
+    writeCell(sheet, "C12", lesson.objectives?.join("\n"));
 
-    // ===============================
+    // =======================
     // II. CONTENT
-    // ===============================
-    setCell("C15", data.contentStandard);
-    setCell("C16", data.performanceStandard);
-    setCell("C17", data.learningCompetency);
+    // =======================
+    writeCell(sheet, "C16", lesson.topic);
 
-    // ===============================
+    // =======================
     // III. LEARNING RESOURCES
-    // ===============================
-    setCell("C19", data.references?.textbook);
-    setCell("C20", data.references?.additional);
+    // =======================
+    writeCell(sheet, "C18", lesson.resources?.join("\n"));
 
-    // ===============================
-    // IV. PROCEDURES (A–G)
-    // ===============================
-    const procedures = data.procedures || {};
+    // =======================
+    // IV. PROCEDURES (ALL DAYS)
+    // =======================
+    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
-    const procedureMap = {
-      A: "motivation",
-      B: "presentation",
-      C: "discussion",
-      D: "practice",
-      E: "generalization",
-      F: "evaluation",
-      G: "assignment"
-    };
+    const procedures = [
+      lesson.motivation,
+      lesson.presentation,
+      lesson.discussion,
+      lesson.practice,
+      lesson.generalization,
+      lesson.assessment,
+      lesson.assignment
+    ];
 
-    let row = 23;
-    Object.keys(procedureMap).forEach(letter => {
-      setCell(`A${row}`, letter);
-      setCell(`C${row}`, procedures[procedureMap[letter]]);
-      row++;
+    /**
+     * DLL FORMAT ROW LOGIC (BASED SA TEMPLATE MO)
+     * Monday starts at row 23
+     * Each day block = 8 rows
+     * A–G = 7 rows
+     */
+    days.forEach((day, dayIndex) => {
+      const baseRow = 23 + dayIndex * 8;
+
+      // Day label
+      writeCell(sheet, `B${baseRow - 1}`, day);
+
+      procedures.forEach((text, i) => {
+        writeCell(sheet, `C${baseRow + i}`, text);
+      });
     });
 
-    // ===============================
-    // V. REMARKS
-    // ===============================
-    setCell("C31", data.remarks);
+    // =======================
+    // EXPORT
+    // =======================
+    const buffer = await workbook.xlsx.writeBuffer();
 
-    // ===============================
-    // VI. REFLECTION
-    // ===============================
-    setCell("C33", data.reflection?.learned);
-    setCell("C34", data.reflection?.difficulty);
-    setCell("C35", data.reflection?.improvement);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="DLL_FILLED.xlsx"'
+    );
 
-    // -------------------------------
-    // Save output
-    // -------------------------------
-    const outputFile = path.join(__dirname, "DLL_FILLED.xlsx");
-    XLSX.writeFile(workbook, outputFile);
-
-    res.download(outputFile);
+    res.send(buffer);
 
   } catch (err) {
-    console.error("DLL ERROR:", err);
-    res.status(500).json({
-      error: "DLL export failed",
-      details: err.message
-    });
+    console.error(err);
+    res.status(500).json({ error: "DLL export failed" });
   }
 });
 
-// ===============================
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`DLL Excel Fill Service running on port ${PORT}`);
 });
