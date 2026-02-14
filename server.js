@@ -11,34 +11,46 @@ const PORT = process.env.PORT || 3000;
 
 app.post("/fill-dll", async (req, res) => {
   try {
-    const { teacherName, gradeLevel, subject, quarter, weekDate, generatedLesson } = req.body;
+    const {
+      teacherName,
+      gradeLevel,
+      subject,
+      quarter,
+      weekDate,
+      generatedLesson
+    } = req.body;
 
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(path.join(__dirname, "DLL_FORMAT.xlsx"));
+    const workbook = new ExcelJS.Workbook();
 
-    const sheet = wb.worksheets[0];
+    // ✅ VERY IMPORTANT: DepEd DLL FORMAT
+    await workbook.xlsx.readFile(
+      path.join(__dirname, "DLL_FORMAT.xlsx")
+    );
 
-    const writeByName = (name, value) => {
-      const ranges = wb.definedNames.getRanges(name);
+    const sheet = workbook.worksheets[0];
+
+    // ===== HELPER: WRITE BY NAME RANGE =====
+    const writeByName = (rangeName, value) => {
+      const ranges = workbook.definedNames.getRanges(rangeName);
       if (!ranges) return;
       ranges.forEach(r => {
         sheet.getCell(r).value = value || "";
       });
     };
 
-    /* ===== HEADER ===== */
+    // ================= HEADER =================
     writeByName("teacher_name", teacherName);
     writeByName("grade_level", gradeLevel);
     writeByName("learning_area", subject);
     writeByName("quarter", quarter);
     writeByName("week_date", weekDate);
 
-    /* ===== OBJECTIVES ===== */
+    // ================= OBJECTIVES =================
     writeByName("obj_content", generatedLesson.I_Objectives?.[0]);
     writeByName("obj_performance", generatedLesson.I_Objectives?.[1]);
     writeByName("obj_learning_competencies", generatedLesson.I_Objectives?.[2]);
 
-    /* ===== PROCEDURES (A–J COMPLETE) ===== */
+    // ================= PROCEDURES (A–J) =================
     const p = generatedLesson.IV_Procedures || [];
 
     writeByName("proc_A_review", p[0]);
@@ -52,7 +64,8 @@ app.post("/fill-dll", async (req, res) => {
     writeByName("proc_I_evaluation", p[8]);
     writeByName("proc_J_remediation", p[9]);
 
-    const buffer = await wb.xlsx.writeBuffer();
+    // ================= EXPORT =================
+    const buffer = await workbook.xlsx.writeBuffer();
 
     res.setHeader(
       "Content-Type",
@@ -60,17 +73,17 @@ app.post("/fill-dll", async (req, res) => {
     );
     res.setHeader(
       "Content-Disposition",
-      'attachment; filename="DLL_FINAL.xlsx"'
+      'attachment; filename="DEPED_DLL_FINAL.xlsx"'
     );
 
     res.send(buffer);
 
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error("DLL EXPORT ERROR:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log("✅ DLL FINAL SERVICE RUNNING");
+  console.log("✅ DepEd DLL Service Running");
 });
