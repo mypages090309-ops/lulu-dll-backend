@@ -8,12 +8,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ================= HEALTH CHECK ================= */
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-/* ================= DLL FILL ================= */
 app.post("/fill-dll", async (req, res) => {
   try {
     const {
@@ -25,93 +23,73 @@ app.post("/fill-dll", async (req, res) => {
       generatedLesson
     } = req.body;
 
-    if (!generatedLesson) {
-      return res.status(400).json({ error: "Missing generatedLesson" });
-    }
-
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile("./DLL_FORMAT.xlsx");
 
-    const sheet1 = workbook.getWorksheet(1);
-    const sheet2 = workbook.getWorksheet(2);
+    const s1 = workbook.getWorksheet(1);
+    const s2 = workbook.getWorksheet(2);
 
-    /* ================= HELPERS ================= */
     const normalize = (v) => {
       if (!v) return "";
       if (Array.isArray(v)) return v.join("\n");
-      if (typeof v === "string") return v.trim();
-      return String(v);
+      return String(v).trim();
     };
 
-    const setCell = (sheet, cell, value) => {
+    const set = (sheet, cell, val) => {
       const c = sheet.getCell(cell);
-      c.value = value;
-      c.alignment = {
-        wrapText: true,
-        vertical: "top"
-      };
+      c.value = val;
+      c.alignment = { wrapText: true, vertical: "top" };
     };
 
-    /* ================= HEADER ================= */
-    setCell(sheet1, "F3", normalize(teacherName));
-    setCell(sheet1, "I2", normalize(gradeLevel));
-    setCell(sheet1, "I3", normalize(subject));
-    setCell(sheet1, "I4", normalize(quarter));
-    setCell(sheet1, "F4", normalize(weekDate));
+    /* ===== HEADER ===== */
+    set(s1, "F3", teacherName);
+    set(s1, "I2", gradeLevel);
+    set(s1, "I3", subject);
+    set(s1, "I4", quarter);
+    set(s1, "F4", weekDate);
 
-    /* ================= OBJECTIVES ================= */
-    setCell(sheet1, "C7", normalize(generatedLesson.I_Objectives));
-    setCell(sheet1, "C8", "");
-    setCell(sheet1, "C9", normalize(generatedLesson.I_Objectives));
+    /* ===== OBJECTIVES ===== */
+    set(s1, "C7", normalize(generatedLesson.I_Objectives));
+    set(s1, "C8", "");
+    set(s1, "C9", normalize(generatedLesson.I_Objectives));
 
-    /* ================= CONTENT ================= */
-    setCell(sheet1, "C11", normalize(generatedLesson.II_Content));
+    /* ===== CONTENT ===== */
+    set(s1, "C11", normalize(generatedLesson.II_Content));
 
-    /* ================= LEARNING RESOURCES ================= */
-    setCell(sheet1, "C14", normalize(generatedLesson.III_LearningResources));
-    setCell(sheet1, "C15", "");
-    setCell(sheet1, "C16", "");
-    setCell(sheet1, "C17", "");
+    /* ===== LEARNING RESOURCES ===== */
+    set(s1, "C14", normalize(generatedLesson.III_LearningResources));
+    set(s1, "C15", "");
+    set(s1, "C16", "");
+    set(s1, "C17", "");
 
-    /* ================= PROCEDURES ================= */
-    const proc = generatedLesson.IV_Procedures || {};
+    /* ===== PROCEDURES (ARRAY → A–G ROWS) ===== */
+    const steps = Array.isArray(generatedLesson.IV_Procedures)
+      ? generatedLesson.IV_Procedures
+      : [];
 
-    setCell(sheet1, "C20", normalize(proc.A_Review));
-    setCell(sheet1, "C21", normalize(proc.B_Purpose));
-    setCell(sheet1, "C22", normalize(proc.C_Presentation));
-    setCell(sheet1, "C23", normalize(proc.D_Practice));
-    setCell(sheet1, "C24", normalize(proc.E_Generalization));
-    setCell(sheet1, "C25", normalize(proc.F_Application));
-    setCell(sheet1, "C26", normalize(proc.G_Evaluation));
+    const procRows = ["C20", "C21", "C22", "C23", "C24", "C25", "C26"];
 
-    /* ================= REFLECTION ================= */
-    setCell(sheet2, "C5", "");
-    setCell(sheet2, "C6", "");
-    setCell(sheet2, "C7", "");
-    setCell(sheet2, "C8", "");
-    setCell(sheet2, "C9", "");
-    setCell(sheet2, "C10", "");
-    setCell(sheet2, "C11", "");
-    setCell(sheet2, "C12", "");
-
-    /* ================= SAVE & DOWNLOAD ================= */
-    const fileName = `DLL_${gradeLevel}_${subject}_${Date.now()}.xlsx`
-      .replace(/\s+/g, "_");
-
-    const outputPath = path.join(process.cwd(), fileName);
-    await workbook.xlsx.writeFile(outputPath);
-
-    res.download(outputPath, fileName, () => {
-      fs.unlinkSync(outputPath);
+    procRows.forEach((cell, i) => {
+      set(s1, cell, steps[i] || "");
     });
 
+    /* ===== REFLECTION (LEFT BLANK) ===== */
+    ["C5","C6","C7","C8","C9","C10","C11","C12"].forEach(c =>
+      set(s2, c, "")
+    );
+
+    const fileName = `DLL_${Date.now()}.xlsx`;
+    const out = path.join(process.cwd(), fileName);
+
+    await workbook.xlsx.writeFile(out);
+    res.download(out, fileName, () => fs.unlinkSync(out));
+
   } catch (err) {
-    console.error("DLL ERROR:", err);
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-/* ================= START SERVER ================= */
 app.listen(3000, () => {
   console.log("✅ DLL Excel Fill Service running on port 3000");
 });
