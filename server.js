@@ -36,34 +36,39 @@ app.post("/fill-dll", async (req, res) => {
     const sheet2 = workbook.getWorksheet(2);
 
     /* ================= HELPERS ================= */
-    const safe = (v) => (v ? v : "");
-
-    const join = (v) =>
-      Array.isArray(v) ? v.join("\n") : safe(v);
+    const normalize = (v) => {
+      if (!v) return "";
+      if (Array.isArray(v)) return v.join("\n");
+      if (typeof v === "string") return v.trim();
+      return String(v);
+    };
 
     const setCell = (sheet, cell, value) => {
       const c = sheet.getCell(cell);
       c.value = value;
-      c.alignment = { wrapText: true, vertical: "top" };
+      c.alignment = {
+        wrapText: true,
+        vertical: "top"
+      };
     };
 
     /* ================= HEADER ================= */
-    setCell(sheet1, "F3", teacherName);
-    setCell(sheet1, "I2", gradeLevel);
-    setCell(sheet1, "I3", subject);
-    setCell(sheet1, "I4", quarter);
-    setCell(sheet1, "F4", weekDate);
+    setCell(sheet1, "F3", normalize(teacherName));
+    setCell(sheet1, "I2", normalize(gradeLevel));
+    setCell(sheet1, "I3", normalize(subject));
+    setCell(sheet1, "I4", normalize(quarter));
+    setCell(sheet1, "F4", normalize(weekDate));
 
     /* ================= OBJECTIVES ================= */
-    setCell(sheet1, "C7", join(generatedLesson.I_Objectives));
+    setCell(sheet1, "C7", normalize(generatedLesson.I_Objectives));
     setCell(sheet1, "C8", "");
-    setCell(sheet1, "C9", join(generatedLesson.I_Objectives));
+    setCell(sheet1, "C9", normalize(generatedLesson.I_Objectives));
 
     /* ================= CONTENT ================= */
-    setCell(sheet1, "C11", safe(generatedLesson.II_Content));
+    setCell(sheet1, "C11", normalize(generatedLesson.II_Content));
 
     /* ================= LEARNING RESOURCES ================= */
-    setCell(sheet1, "C14", join(generatedLesson.III_LearningResources));
+    setCell(sheet1, "C14", normalize(generatedLesson.III_LearningResources));
     setCell(sheet1, "C15", "");
     setCell(sheet1, "C16", "");
     setCell(sheet1, "C17", "");
@@ -71,15 +76,15 @@ app.post("/fill-dll", async (req, res) => {
     /* ================= PROCEDURES ================= */
     const proc = generatedLesson.IV_Procedures || {};
 
-    setCell(sheet1, "C20", join(proc.A_Review));
-    setCell(sheet1, "C21", join(proc.B_Purpose));
-    setCell(sheet1, "C22", join(proc.C_Presentation));
-    setCell(sheet1, "C23", join(proc.D_Practice));
-    setCell(sheet1, "C24", join(proc.E_Generalization));
-    setCell(sheet1, "C25", join(proc.F_Application));
-    setCell(sheet1, "C26", join(proc.G_Evaluation));
+    setCell(sheet1, "C20", normalize(proc.A_Review));
+    setCell(sheet1, "C21", normalize(proc.B_Purpose));
+    setCell(sheet1, "C22", normalize(proc.C_Presentation));
+    setCell(sheet1, "C23", normalize(proc.D_Practice));
+    setCell(sheet1, "C24", normalize(proc.E_Generalization));
+    setCell(sheet1, "C25", normalize(proc.F_Application));
+    setCell(sheet1, "C26", normalize(proc.G_Evaluation));
 
-    /* ================= REFLECTION (SAFE EMPTY) ================= */
+    /* ================= REFLECTION ================= */
     setCell(sheet2, "C5", "");
     setCell(sheet2, "C6", "");
     setCell(sheet2, "C7", "");
