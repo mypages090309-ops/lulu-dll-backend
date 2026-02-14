@@ -1,100 +1,88 @@
-import express from "express";
-import cors from "cors";
-import ExcelJS from "exceljs";
-import path from "path";
-import { fileURLToPath } from "url";
+const express = require("express");
+const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
+const XLSX = require("xlsx");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const PORT = process.env.PORT || 3000;
 
-// ===============================
-// HELPER: safely set named range
-// ===============================
+/**
+ * Utility: set value to named range
+ */
 function setNamedRange(workbook, rangeName, value) {
-  const definedName = workbook.definedNames.getName(rangeName);
-  if (!definedName) return;
+  const name = workbook.Workbook.Names.find(n => n.Name === rangeName);
+  if (!name) return;
 
-  const ranges = definedName.ranges;
-  ranges.forEach((r) => {
-    const ws = workbook.getWorksheet(r.split("!")[0].replace(/'/g, ""));
-    const cellRef = r.split("!")[1];
-    ws.getCell(cellRef).value = value ?? "";
-  });
+  const sheetName = name.Ref.split("!")[0].replace(/'/g, "");
+  const cellRef = name.Ref.split("!")[1];
+  const ws = workbook.Sheets[sheetName];
+
+  XLSX.utils.sheet_add_aoa(ws, [[value]], { origin: cellRef });
 }
 
-// ===============================
-// MAIN ENDPOINT
-// ===============================
+/**
+ * MAIN DLL EXPORT
+ */
 app.post("/fill-dll", async (req, res) => {
   try {
     const data = req.body;
 
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(
-      path.join(__dirname, "DLL_FORMAT.xlsx")
-    );
+    const templatePath = path.join(__dirname, "DLL_FORMAT.xlsx");
+    const wb = XLSX.readFile(templatePath);
 
-    // ===============================
-    // HEADER FIELDS
-    // ===============================
-    setNamedRange(workbook, "school_name", data.school);
-    setNamedRange(workbook, "teacher_name", data.teacherName);
-    setNamedRange(workbook, "grade_level", data.gradeLevel);
-    setNamedRange(workbook, "learning_area", data.subject);
-    setNamedRange(workbook, "quarter", data.quarter);
-    setNamedRange(workbook, "week_date", data.weekDate);
+    /* ================= HEADER ================= */
+    setNamedRange(wb, "school_name", data.school || "");
+    setNamedRange(wb, "teacher_name", data.teacher || "");
+    setNamedRange(wb, "grade_level", data.gradeLevel || "");
+    setNamedRange(wb, "learning_area", data.subject || "");
+    setNamedRange(wb, "quarter", data.quarter || "");
+    setNamedRange(wb, "week_date", data.weekDate || "");
 
-    // ===============================
-    // DAYS (MONDAY – FRIDAY)
-    // ===============================
-    const days = ["monday", "tuesday", "wednesday", "thursday", "friday"];
+    /* ================= OBJECTIVES ================= */
+    setNamedRange(wb, "content_standards", data.objectives?.contentStandards || "");
+    setNamedRange(wb, "performance_standards", data.objectives?.performanceStandards || "");
 
-    days.forEach((day) => {
-      const d = data.dll?.[day] || {};
+    const days = ["mon", "tue", "wed", "thu", "fri"];
 
-      setNamedRange(workbook, `${day}_objectives`, d.objectives);
-      setNamedRange(workbook, `${day}_content`, d.content);
-
-      // PROCEDURES A–J (10 steps)
-      setNamedRange(workbook, `${day}_proc_a`, d.procedures?.A);
-      setNamedRange(workbook, `${day}_proc_b`, d.procedures?.B);
-      setNamedRange(workbook, `${day}_proc_c`, d.procedures?.C);
-      setNamedRange(workbook, `${day}_proc_d`, d.procedures?.D);
-      setNamedRange(workbook, `${day}_proc_e`, d.procedures?.E);
-      setNamedRange(workbook, `${day}_proc_f`, d.procedures?.F);
-      setNamedRange(workbook, `${day}_proc_g`, d.procedures?.G);
-      setNamedRange(workbook, `${day}_proc_h`, d.procedures?.H);
-      setNamedRange(workbook, `${day}_proc_i`, d.procedures?.I);
-      setNamedRange(workbook, `${day}_proc_j`, d.procedures?.J);
-
-      setNamedRange(workbook, `${day}_assessment`, d.assessment);
-      setNamedRange(workbook, `${day}_assignment`, d.assignment);
-      setNamedRange(workbook, `${day}_remarks`, d.remarks);
+    days.forEach(day => {
+      setNamedRange(
+        wb,
+        `learning_competencies_${day}`,
+        (data.objectives?.learningCompetencies?.[day] || []).join("\n")
+      );
     });
 
-    // ===============================
-    // SEND FILE
-    // ===============================
-    res.setHeader(
-      "Content-Disposition",
-      "attachment; filename=DLL_DEPED.xlsx"
-    );
+    /* ================= PROCEDURES (A–J) ================= */
+    days.forEach(day => {
+      const procs = data.procedures?.[day] || {};
 
-    await workbook.xlsx.write(res);
-    res.end();
+      setNamedRange(wb, `proc_a_${day}`, procs.A || "");
+      setNamedRange(wb, `proc_b_${day}`, procs.B || "");
+      setNamedRange(wb, `proc_c_${day}`, procs.C || "");
+      setNamedRange(wb, `proc_d_${day}`, procs.D || "");
+      setNamedRange(wb, `proc_e_${day}`, procs.E || "");
+      setNamedRange(wb, `proc_f_${day}`, procs.F || "");
+      setNamedRange(wb, `proc_g_${day}`, procs.G || "");
+      setNamedRange(wb, `proc_h_${day}`, procs.H || "");
+      setNamedRange(wb, `proc_i_${day}`, procs.I || "");
+      setNamedRange(wb, `proc_j_${day}`, procs.J || "");
+    });
 
+    /* ================= SAVE FILE ================= */
+    const outPath = path.join(__dirname, "DLL_FILLED.xlsx");
+    XLSX.writeFile(wb, outPath);
+
+    res.download(outPath, "DLL.xlsx");
   } catch (err) {
     console.error("DLL EXPORT ERROR:", err);
     res.status(500).json({ error: "DLL export failed" });
   }
 });
 
-// ===============================
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`DLL Excel Fill Service running on port ${PORT}`);
+  console.log(`✅ DLL Excel Fill Service running on port ${PORT}`);
 });
