@@ -1,8 +1,8 @@
 import express from "express";
 import cors from "cors";
 import ExcelJS from "exceljs";
-import path from "path";
 import fs from "fs";
+import path from "path";
 
 const app = express();
 app.use(cors());
@@ -10,89 +10,96 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// helper: write to merged cell safely
-function writeCell(sheet, cell, value) {
+/* ================= HELPER ================= */
+function write(sheet, cell, value) {
   const c = sheet.getCell(cell);
   c.value = value || "";
   c.alignment = { wrapText: true, vertical: "top" };
 }
 
-// =======================
-// FILL DLL ENDPOINT
-// =======================
+/* ================= HEALTH ================= */
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+/* ================= DLL EXPORT ================= */
 app.post("/fill-dll", async (req, res) => {
   try {
-    const lesson = req.body;
+    const {
+      teacherName,
+      gradeLevel,
+      subject,
+      quarter,
+      weekDate,
+      generatedLesson
+    } = req.body;
+
+    if (!generatedLesson) {
+      return res.status(400).json({ error: "Missing generatedLesson" });
+    }
 
     const templatePath = path.join(process.cwd(), "DLL_FORMAT.xlsx");
     if (!fs.existsSync(templatePath)) {
-      return res.status(500).json({ error: "DLL template not found" });
+      return res.status(500).json({ error: "DLL_FORMAT.xlsx not found" });
     }
 
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(templatePath);
-    const sheet = workbook.worksheets[0];
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(templatePath);
 
-    // =======================
-    // HEADER (STATIC)
-    // =======================
-    writeCell(sheet, "C5", lesson.teacherName);
-    writeCell(sheet, "C6", lesson.gradeLevel);
-    writeCell(sheet, "C7", lesson.subject);
-    writeCell(sheet, "C8", lesson.quarter);
-    writeCell(sheet, "C9", lesson.weekDate);
+    // 🔒 SINGLE SHEET ONLY (AS PER YOUR TEMPLATE)
+    const sheet = wb.getWorksheet(1);
 
-    // =======================
-    // I. OBJECTIVES
-    // =======================
-    writeCell(sheet, "C12", lesson.objectives?.join("\n"));
+    /* ========== HEADER (MERGED C–G) ========== */
+    write(sheet, "C5", teacherName);
+    write(sheet, "C6", gradeLevel);
+    write(sheet, "C7", subject);
+    write(sheet, "C8", quarter);
+    write(sheet, "C9", weekDate);
 
-    // =======================
-    // II. CONTENT
-    // =======================
-    writeCell(sheet, "C16", lesson.topic);
+    /* ========== I. OBJECTIVES (C12:G14) ========== */
+    const objectivesText = Array.isArray(generatedLesson.I_Objectives)
+      ? generatedLesson.I_Objectives.join("\n")
+      : generatedLesson.I_Objectives || "";
 
-    // =======================
-    // III. LEARNING RESOURCES
-    // =======================
-    writeCell(sheet, "C18", lesson.resources?.join("\n"));
+    write(sheet, "C12", objectivesText);
 
-    // =======================
-    // IV. PROCEDURES (ALL DAYS)
-    // =======================
+    /* ========== II. CONTENT (C16:G16) ========== */
+    write(sheet, "C16", generatedLesson.II_Content || "");
+
+    /* ========== III. LEARNING RESOURCES (C18:G20) ========== */
+    const resourcesText = Array.isArray(generatedLesson.III_LearningResources)
+      ? generatedLesson.III_LearningResources.join("\n")
+      : generatedLesson.III_LearningResources || "";
+
+    write(sheet, "C18", resourcesText);
+
+    /* ========== IV. PROCEDURES – WEEKLY (CRITICAL FIX) ========== */
+    const procedures = Array.isArray(generatedLesson.IV_Procedures)
+      ? generatedLesson.IV_Procedures
+      : [];
+
     const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
-    const procedures = [
-      lesson.motivation,
-      lesson.presentation,
-      lesson.discussion,
-      lesson.practice,
-      lesson.generalization,
-      lesson.assessment,
-      lesson.assignment
-    ];
-
     /**
-     * DLL FORMAT ROW LOGIC (BASED SA TEMPLATE MO)
-     * Monday starts at row 23
-     * Each day block = 8 rows
-     * A–G = 7 rows
+     * DLL FORMAT LOGIC (BASED ON YOUR TEMPLATE):
+     * - Monday block starts at row 23
+     * - Each day block = 7 procedure rows + 1 spacer = 8 rows
+     * - A–G rows are merged C–G
      */
     days.forEach((day, dayIndex) => {
       const baseRow = 23 + dayIndex * 8;
 
-      // Day label
-      writeCell(sheet, `B${baseRow - 1}`, day);
+      // Day label (Column B)
+      write(sheet, `B${baseRow - 1}`, day);
 
-      procedures.forEach((text, i) => {
-        writeCell(sheet, `C${baseRow + i}`, text);
-      });
+      // Procedures A–G
+      for (let i = 0; i < 7; i++) {
+        write(sheet, `C${baseRow + i}`, procedures[i] || "");
+      }
     });
 
-    // =======================
-    // EXPORT
-    // =======================
-    const buffer = await workbook.xlsx.writeBuffer();
+    /* ========== EXPORT ========== */
+    const buffer = await wb.xlsx.writeBuffer();
 
     res.setHeader(
       "Content-Type",
@@ -106,11 +113,12 @@ app.post("/fill-dll", async (req, res) => {
     res.send(buffer);
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "DLL export failed" });
+    console.error("DLL ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
+/* ================= START ================= */
 app.listen(PORT, () => {
-  console.log(`DLL Excel Fill Service running on port ${PORT}`);
+  console.log(`✅ DLL Excel Fill Service running on port ${PORT}`);
 });
