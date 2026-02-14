@@ -1,100 +1,131 @@
 import express from "express";
-import ExcelJS from "exceljs";
 import cors from "cors";
+import XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
-});
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-app.post("/fill-dll", async (req, res) => {
+// ===============================
+// POST /fill-dll
+// ===============================
+app.post("/fill-dll", (req, res) => {
   try {
-    const {
-      teacherName,
-      gradeLevel,
-      subject,
-      quarter,
-      weekDate,
-      generatedLesson
-    } = req.body;
+    const data = req.body;
 
-    if (!generatedLesson) {
-      return res.status(400).json({ error: "Missing generatedLesson" });
-    }
-
-    // ✅ ABSOLUTE PATH (RENDER SAFE)
-    const templatePath = path.join(process.cwd(), "DLL_FORMAT.xlsx");
+    // -------------------------------
+    // Load template
+    // -------------------------------
+    const templatePath = path.join(__dirname, "DLL_FORMAT.xlsx");
     if (!fs.existsSync(templatePath)) {
-      throw new Error("DLL_FORMAT.xlsx not found in backend root");
+      throw new Error("DLL_FORMAT.xlsx not found");
     }
 
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(templatePath);
+    const workbook = XLSX.readFile(templatePath);
+    const sheetName = "DLL";
 
-    // ✅ USE FIRST SHEET ONLY (SAFE)
-    const s1 = wb.getWorksheet(1);
+    if (!workbook.Sheets[sheetName]) {
+      throw new Error("Sheet 'DLL' not found in template");
+    }
 
-    const normalize = (v) => {
-      if (!v) return "";
-      if (Array.isArray(v)) return v.join("\n");
-      return String(v).trim();
+    const sheet = workbook.Sheets[sheetName];
+
+    // -------------------------------
+    // Helper function
+    // -------------------------------
+    const setCell = (cell, value) => {
+      sheet[cell] = { t: "s", v: value ?? "" };
     };
 
-    const set = (cell, value) => {
-      const c = s1.getCell(cell);
-      c.value = value;
-      c.alignment = { wrapText: true, vertical: "top" };
-    };
+    // ===============================
+    // HEADER SECTION
+    // ===============================
+    setCell("C5", data.teacherName);
+    setCell("C6", data.gradeLevel);
+    setCell("C7", data.subject);
+    setCell("F5", data.quarter);
+    setCell("F6", data.weekDate);
+    setCell("C8", data.topic);
 
-    /* ===== HEADER (BASED ON YOUR TEMPLATE) ===== */
-    set("E4", teacherName);
-    set("J4", gradeLevel);
-    set("E5", subject);
-    set("J5", quarter);
-    set("E6", weekDate);
-
-    /* ===== I. OBJECTIVES ===== */
-    set("D9", normalize(generatedLesson.I_Objectives));
-    set("D10", normalize(generatedLesson.I_Objectives));
-    set("D11", normalize(generatedLesson.I_Objectives));
-
-    /* ===== II. CONTENT ===== */
-    set("D13", normalize(generatedLesson.II_Content));
-
-    /* ===== III. LEARNING RESOURCES ===== */
-    set("D15", normalize(generatedLesson.III_LearningResources));
-    set("D16", "");
-    set("D17", "");
-    set("D18", "");
-
-    /* ===== IV. PROCEDURES (ARRAY → ROWS) ===== */
-    const steps = Array.isArray(generatedLesson.IV_Procedures)
-      ? generatedLesson.IV_Procedures
-      : [];
-
-    const procCells = ["D21","D22","D23","D24","D25","D26","D27"];
-    procCells.forEach((cell, i) => {
-      set(cell, steps[i] || "");
+    // ===============================
+    // I. OBJECTIVES
+    // ===============================
+    (data.objectives || []).forEach((text, i) => {
+      setCell(`C${11 + i}`, text);
     });
 
-    /* ===== SAVE & DOWNLOAD ===== */
-    const fileName = `DLL_${Date.now()}.xlsx`;
-    const outPath = path.join(process.cwd(), fileName);
+    // ===============================
+    // II. CONTENT
+    // ===============================
+    setCell("C15", data.contentStandard);
+    setCell("C16", data.performanceStandard);
+    setCell("C17", data.learningCompetency);
 
-    await wb.xlsx.writeFile(outPath);
-    res.download(outPath, fileName, () => fs.unlinkSync(outPath));
+    // ===============================
+    // III. LEARNING RESOURCES
+    // ===============================
+    setCell("C19", data.references?.textbook);
+    setCell("C20", data.references?.additional);
+
+    // ===============================
+    // IV. PROCEDURES (A–G)
+    // ===============================
+    const procedures = data.procedures || {};
+
+    const procedureMap = {
+      A: "motivation",
+      B: "presentation",
+      C: "discussion",
+      D: "practice",
+      E: "generalization",
+      F: "evaluation",
+      G: "assignment"
+    };
+
+    let row = 23;
+    Object.keys(procedureMap).forEach(letter => {
+      setCell(`A${row}`, letter);
+      setCell(`C${row}`, procedures[procedureMap[letter]]);
+      row++;
+    });
+
+    // ===============================
+    // V. REMARKS
+    // ===============================
+    setCell("C31", data.remarks);
+
+    // ===============================
+    // VI. REFLECTION
+    // ===============================
+    setCell("C33", data.reflection?.learned);
+    setCell("C34", data.reflection?.difficulty);
+    setCell("C35", data.reflection?.improvement);
+
+    // -------------------------------
+    // Save output
+    // -------------------------------
+    const outputFile = path.join(__dirname, "DLL_FILLED.xlsx");
+    XLSX.writeFile(workbook, outputFile);
+
+    res.download(outputFile);
 
   } catch (err) {
     console.error("DLL ERROR:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: "DLL export failed",
+      details: err.message
+    });
   }
 });
 
-app.listen(3000, () => {
-  console.log("✅ DLL Excel Fill Service running on port 3000");
+// ===============================
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`DLL Excel Fill Service running on port ${PORT}`);
 });
