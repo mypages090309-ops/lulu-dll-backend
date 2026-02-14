@@ -38,6 +38,7 @@ app.post("/fill-dll", async (req, res) => {
       return res.status(400).json({ error: "Missing generatedLesson" });
     }
 
+    /* ===== LOAD TEMPLATE ===== */
     const templatePath = path.join(process.cwd(), "DLL_FORMAT.xlsx");
     if (!fs.existsSync(templatePath)) {
       return res.status(500).json({ error: "DLL_FORMAT.xlsx not found" });
@@ -46,59 +47,58 @@ app.post("/fill-dll", async (req, res) => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(templatePath);
 
-    // 🔒 SINGLE SHEET ONLY (AS PER YOUR TEMPLATE)
+    // Single sheet (as per your template)
     const sheet = wb.getWorksheet(1);
 
-    /* ========== HEADER (MERGED C–G) ========== */
+    /* ================= HEADER (C–G MERGED) ================= */
     write(sheet, "C5", teacherName);
     write(sheet, "C6", gradeLevel);
     write(sheet, "C7", subject);
     write(sheet, "C8", quarter);
     write(sheet, "C9", weekDate);
 
-    /* ========== I. OBJECTIVES (C12:G14) ========== */
+    /* ================= I. OBJECTIVES (C12:G14) ================= */
     const objectivesText = Array.isArray(generatedLesson.I_Objectives)
       ? generatedLesson.I_Objectives.join("\n")
       : generatedLesson.I_Objectives || "";
 
     write(sheet, "C12", objectivesText);
 
-    /* ========== II. CONTENT (C16:G16) ========== */
+    /* ================= II. CONTENT (C16:G16) ================= */
     write(sheet, "C16", generatedLesson.II_Content || "");
 
-    /* ========== III. LEARNING RESOURCES (C18:G20) ========== */
+    /* ================= III. LEARNING RESOURCES (C18:G20) ================= */
     const resourcesText = Array.isArray(generatedLesson.III_LearningResources)
       ? generatedLesson.III_LearningResources.join("\n")
       : generatedLesson.III_LearningResources || "";
 
     write(sheet, "C18", resourcesText);
 
-    /* ========== IV. PROCEDURES – WEEKLY (CRITICAL FIX) ========== */
+    /* ================= IV. PROCEDURES (WEEKLY – FINAL FIX) ================= */
     const procedures = Array.isArray(generatedLesson.IV_Procedures)
       ? generatedLesson.IV_Procedures
       : [];
 
-    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+    // EXACT row starts based on YOUR DLL_FORMAT.xlsx
+    const dayRowMap = {
+      Monday: 23,
+      Tuesday: 31,
+      Wednesday: 39,
+      Thursday: 47,
+      Friday: 55
+    };
 
-    /**
-     * DLL FORMAT LOGIC (BASED ON YOUR TEMPLATE):
-     * - Monday block starts at row 23
-     * - Each day block = 7 procedure rows + 1 spacer = 8 rows
-     * - A–G rows are merged C–G
-     */
-    days.forEach((day, dayIndex) => {
-      const baseRow = 23 + dayIndex * 8;
-
+    Object.entries(dayRowMap).forEach(([day, startRow]) => {
       // Day label (Column B)
-      write(sheet, `B${baseRow - 1}`, day);
+      write(sheet, `B${startRow - 1}`, day);
 
-      // Procedures A–G
+      // A–G Procedures (C–G merged per row)
       for (let i = 0; i < 7; i++) {
-        write(sheet, `C${baseRow + i}`, procedures[i] || "");
+        write(sheet, `C${startRow + i}`, procedures[i] || "");
       }
     });
 
-    /* ========== EXPORT ========== */
+    /* ================= EXPORT ================= */
     const buffer = await wb.xlsx.writeBuffer();
 
     res.setHeader(
