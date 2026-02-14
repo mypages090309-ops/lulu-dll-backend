@@ -8,10 +8,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+/* ================= HEALTH ================= */
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+/* ================= DLL EXPORT ================= */
 app.post("/fill-dll", async (req, res) => {
   try {
     const {
@@ -23,11 +25,11 @@ app.post("/fill-dll", async (req, res) => {
       generatedLesson
     } = req.body;
 
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile("./DLL_FORMAT.xlsx");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile("./DLL_FORMAT.xlsx");
 
-    const s1 = workbook.getWorksheet(1);
-    const s2 = workbook.getWorksheet(2);
+    const s1 = wb.getWorksheet("DLL");   // Sheet name as in template
+    const s2 = wb.getWorksheet("REFLECTION");
 
     const normalize = (v) => {
       if (!v) return "";
@@ -35,57 +37,73 @@ app.post("/fill-dll", async (req, res) => {
       return String(v).trim();
     };
 
-    const set = (sheet, cell, val) => {
-      const c = sheet.getCell(cell);
-      c.value = val;
+    const set = (cell, value) => {
+      const c = s1.getCell(cell);
+      c.value = value;
       c.alignment = { wrapText: true, vertical: "top" };
     };
 
-    /* ===== HEADER ===== */
-    set(s1, "F3", teacherName);
-    set(s1, "I2", gradeLevel);
-    set(s1, "I3", subject);
-    set(s1, "I4", quarter);
-    set(s1, "F4", weekDate);
+    /* ============ HEADER (MERGED CELLS SAFE) ============ */
+    set("E4", teacherName);     // Teacher
+    set("J4", gradeLevel);      // Grade Level
+    set("E5", subject);         // Subject
+    set("J5", quarter);         // Quarter
+    set("E6", weekDate);        // Week
 
-    /* ===== OBJECTIVES ===== */
-    set(s1, "C7", normalize(generatedLesson.I_Objectives));
-    set(s1, "C8", "");
-    set(s1, "C9", normalize(generatedLesson.I_Objectives));
+    /* ============ I. OBJECTIVES ============ */
+    set("D9", normalize(generatedLesson.I_Objectives));
+    set("D10", normalize(generatedLesson.I_Objectives));
+    set("D11", normalize(generatedLesson.I_Objectives));
 
-    /* ===== CONTENT ===== */
-    set(s1, "C11", normalize(generatedLesson.II_Content));
+    /* ============ II. CONTENT ============ */
+    set("D13", normalize(generatedLesson.II_Content));
 
-    /* ===== LEARNING RESOURCES ===== */
-    set(s1, "C14", normalize(generatedLesson.III_LearningResources));
-    set(s1, "C15", "");
-    set(s1, "C16", "");
-    set(s1, "C17", "");
+    /* ============ III. LEARNING RESOURCES ============ */
+    set("D15", normalize(generatedLesson.III_LearningResources));
+    set("D16", "");
+    set("D17", "");
+    set("D18", "");
 
-    /* ===== PROCEDURES (ARRAY → A–G ROWS) ===== */
+    /* ============ IV. PROCEDURES (ARRAY → ROWS) ============ */
     const steps = Array.isArray(generatedLesson.IV_Procedures)
       ? generatedLesson.IV_Procedures
       : [];
 
-    const procRows = ["C20", "C21", "C22", "C23", "C24", "C25", "C26"];
+    const procCells = [
+      "D21", // A
+      "D22", // B
+      "D23", // C
+      "D24", // D
+      "D25", // E
+      "D26", // F
+      "D27"  // G
+    ];
 
-    procRows.forEach((cell, i) => {
-      set(s1, cell, steps[i] || "");
+    procCells.forEach((cell, i) => {
+      set(cell, steps[i] || "");
     });
 
-    /* ===== REFLECTION (LEFT BLANK) ===== */
-    ["C5","C6","C7","C8","C9","C10","C11","C12"].forEach(c =>
-      set(s2, c, "")
-    );
+    /* ============ REFLECTION (SAFE BLANK) ============ */
+    if (s2) {
+      ["D6","D7","D8","D9","D10","D11","D12"].forEach(c => {
+        const cell = s2.getCell(c);
+        cell.value = "";
+        cell.alignment = { wrapText: true, vertical: "top" };
+      });
+    }
 
+    /* ============ SAVE & DOWNLOAD ============ */
     const fileName = `DLL_${Date.now()}.xlsx`;
-    const out = path.join(process.cwd(), fileName);
+    const outPath = path.join(process.cwd(), fileName);
 
-    await workbook.xlsx.writeFile(out);
-    res.download(out, fileName, () => fs.unlinkSync(out));
+    await wb.xlsx.writeFile(outPath);
+
+    res.download(outPath, fileName, () => {
+      fs.unlinkSync(outPath);
+    });
 
   } catch (err) {
-    console.error(err);
+    console.error("DLL ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
